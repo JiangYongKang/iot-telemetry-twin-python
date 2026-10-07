@@ -1,10 +1,39 @@
-"""设备影子：期望/上报状态分离，增量补报幂等。"""
+"""设备影子：期望/上报状态分离，增量补报幂等，字段级期望差异。"""
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from typing import Any
 
 from .models import DeviceShadow
+
+
+@dataclass(frozen=True)
+class FieldDelta:
+    """单个未对齐字段的差异明细。"""
+
+    field: str
+    desired_value: Any
+    reported_value: Any  # 设备从未上报过该字段时为 None，并由 reported_present 区分
+    reported_present: bool
+
+
+@dataclass(frozen=True)
+class ShadowDelta:
+    """期望状态与上报状态的字段级差异。
+
+    以最新期望为准：只列出 desired 中尚未被 reported 对齐的字段；
+    设备把对应字段报上来之后，差异随之缩小、消失。
+    """
+
+    device_id: str
+    desired_version: int
+    reported_version: int
+    fields: tuple[FieldDelta, ...]
+
+    @property
+    def in_sync(self) -> bool:
+        return not self.fields
 
 
 class ShadowStore:
@@ -46,3 +75,38 @@ class ShadowStore:
             shadow.reported_version += 1
             shadow.last_device_ts = device_ts
             return True
+
+    def rebuild_reported(
+        self, device_id: str, folded_state: dict[str, Any], last_device_ts: float
+    ) -> None:
+        """回放重建：用按设备时间顺序折叠出的状态整体替换 reported。
+
+        仅在补报乱序历史消息时由 IngestService 在设备锁内调用。
+        """
+        with self._lock:
+            shadow = self._shadows.setdefault(device_id, DeviceShadow())
+            shadow.reported = dict(folded_state)
+            shadow.reported_version += 1
+            shadow.last_device_ts = last_device_ts
+
+    def delta(self, device_id: str) -> ShadowDelta:
+        """计算字段级期望差异：以最新 desired 为准，逐字段比对 reported。"""
+        with self._lock:
+            shadow = self._shadows.setdefault(device_id, DeviceShadow())
+            fields = tuple(
+                FieldDelta(
+                    field=key,
+                    desired_value=desired_value,
+                    reported_value=shadow.reported.get(key),
+                    reported_present=key in shadow.reported,
+                )
+                for key, desired_value in shadow.desired.items()
+                if key not in shadow.reported
+                or shadow.reported[key] != desired_value
+            )
+            return ShadowDelta(
+                device_id=device_id,
+                desired_version=shadow.desired_version,
+                reported_version=shadow.reported_version,
+                fields=fields,
+            )
