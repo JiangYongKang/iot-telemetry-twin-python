@@ -188,5 +188,5 @@ def test_reject_reasons_are_distinguishable() -> None:
         svc.ingest("dev-ok", "right", TelemetryMessage("dev-ok", "q-2", 2.0))
     log.info("配额=1 第二条上报 -> 拒绝原因 %s", exc_info.value.reason.value)
     assert exc_info.value.reason is RejectReason.QUOTA_EXCEEDED
-    # 四种原因互不相同
-    assert len({r.value for r in RejectReason}) == 4
+    # 五种原因互不相同
+    assert len({r.value for r in RejectReason}) == 5

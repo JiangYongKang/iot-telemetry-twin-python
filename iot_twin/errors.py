@@ -9,6 +9,9 @@ class RejectReason(str, Enum):
     BAD_CREDENTIAL = "bad_credential"
     DEVICE_DISABLED = "device_disabled"
     QUOTA_EXCEEDED = "quota_exceeded"
+    # 设备请求接续的位置已超出服务端保留范围，无法保证回放完整，
+    # 必须全量对齐，不能把残缺回放当成正常结果。
+    RESYNC_REQUIRED = "resync_required"
 
 
 class RejectError(Exception):
